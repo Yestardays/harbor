@@ -1,8 +1,10 @@
 # Company SSO for Harbor
 
-Harbor authenticates through Keycloak using OIDC authorization-code flow with
-PKCE. The company Keycloak brokers authentication to Feishu (`lark`) and also
-supports WeChat Work. Harbor receives Keycloak tokens, not Feishu tokens.
+Harbor authenticates through local Keycloak using OIDC authorization-code flow
+with PKCE. For personal development, the local `lark` broker talks directly to
+your own Feishu app. No company Keycloak or company credentials are involved.
+The alternative company-realm integration is documented separately below.
+Harbor receives Keycloak tokens, not Feishu tokens.
 
 Clicking Harbor's OIDC button can go directly to Feishu without showing the
 Keycloak form. This uses Harbor's existing `oidc_extra_redirect_parms` setting;
@@ -30,8 +32,9 @@ upstream sync takes that migration number.
 
 ## Local development
 
-The local realm has password-based test users and **no `lark` identity provider**.
-Keep `OIDC_EXTRA_REDIRECT_PARMS` unset here. Test accounts, employee numbers and
+The imported fixture has password-based test users. The direct Feishu setup
+adds a `lark` broker at runtime. Keep `OIDC_EXTRA_REDIRECT_PARMS` unset when using
+only fixture users. Test accounts, employee numbers and
 credentials are defined in `realm-wxb.json`; use that fixture rather than
 copying those values into other documents or logs.
 
@@ -46,8 +49,8 @@ copying those values into other documents or logs.
    Wait for successful realm import. The issuer is
    `http://keycloak.localhost:8081/realms/wxb`. Browsers resolve `*.localhost`
    locally; Harbor resolves it using the network alias added below. Keycloak's
-   H2 database lives in the container's writable layer and is reset when the
-   container is recreated. This stack is for development only.
+   H2 database lives in the `harbor-sso-keycloak-data` volume and survives container
+   recreation. This stack is for development only.
 
 2. Build Harbor from the repository root. Stock images do not include the Go
    changes or migration:
@@ -94,7 +97,83 @@ Harbor locks changes to `auth_mode` after ordinary local users have been added.
 Configure a fresh instance before adding such users. Updating OIDC settings on
 an already configured OIDC instance does not require deleting users.
 
-## Real Feishu login from local Harbor
+## Direct Feishu login with your independent development organization
+
+This is the active local setup. It uses Keycloak **26.8.1**'s built-in generic
+OAuth v2 broker, including nested user-info claims. No custom Java plugin or
+additional authentication service is needed. The older 26.0 fixture image does
+not provide this broker; do not downgrade the persistent database in place.
+
+1. In your own Feishu organization, create a self-built app and register this
+   exact redirect URL under Security Settings:
+
+   ```text
+   http://keycloak.localhost:8081/realms/wxb/broker/lark/endpoint
+   ```
+
+2. Save your app's credentials in `deploy/company-sso/.env.feishu` as
+   `FEISHU_APP_ID` and `FEISHU_APP_SECRET`. The file is gitignored; the setup
+   script restricts its permissions to 0600. Never paste secrets into chat or
+   logs. No `openid`, `profile`, `email`, address-book or message scopes are
+   requested from Feishu for the initial basic login.
+
+3. From the repository root run:
+
+   ```bash
+   python3 deploy/company-sso/setup-local-feishu.py
+   ```
+
+   The script validates the app credentials without publishing the app, creates
+   or updates the native `lark` broker, attaches the Docker network, and points
+   Harbor's login button at it with `kc_idp_hint=lark`. Both OAuth legs use PKCE
+   S256. It does not modify the company realm or grant admin group membership.
+
+4. Open `http://localhost:8080` in a fresh browser session, click the Feishu
+   login button, and complete authentication using your **personal development
+   organization** identity. A browser that retained company identities can show
+   “no permission to use this app”; choose another account and select the
+   personal organization. A successful app credential check and redirect do not
+   prove the user has been granted application availability.
+
+The broker maps `data.open_id` to its stable upstream ID and local username,
+`data.name` to the full display name, and `data.email` only when supplied. It
+uses the v2 token endpoint with form-encoded client authentication and reads the
+`data` object from Feishu's user-info response. The local `wxb` profile no longer
+requires an email address or surname, so basic login does not require fabricated
+contact information. The original profile configuration is saved privately in
+`.runtime/user-profile-before-feishu.json`. Email is not trusted for automatic
+account linking, and Feishu access tokens are not stored in the broker model.
+
+This first check deliberately leaves employee-number permissions off. A real
+Feishu employee number is `employee_no`; it does not appear without an
+appropriate permission and a configured value in your personal organization.
+The native OAuth v2 provider maps the standard identity fields above; importing
+custom employee attributes requires a separate mapping implementation. Harbor's
+existing `employee_number` persistence remains available once such a claim is
+provided. Do not assume Feishu `user_id` is an employee number.
+
+If Feishu requires publishing or changing app availability, stop and review the
+personal-organization settings yourself. The scripts never create, publish,
+reset credentials, or request platform permissions for a Feishu app.
+
+### Existing local Keycloak data and recovery
+
+This instance was migrated by stopping 26.0.8, backing up its data, performing an
+offline realm export, and importing it into a fresh 26.8.1 volume. The existing
+user IDs were checked unchanged. Raw data and realm export are kept under the
+local Harbor data directory outside Git. A gitignored Compose `.env` selects
+that preserved realm export through `KEYCLOAK_REALM_IMPORT`; new developers can
+use the default `realm-wxb.json` fixture instead. Realm import skips an existing
+realm, so persisted broker configuration is retained on normal restarts.
+
+To return to the fixture login entry without deleting accounts, run
+`setup-harbor-oidc.sh` with its defaults and no extra redirect parameters. To
+restore the original local profile requirements, use the saved profile JSON
+with the local Keycloak Admin API after confirming users have the required
+attributes. Keep the data volume and credential file; removing the volume loses
+linked user identities. Retain the backup before any database downgrade.
+
+## Optional: local Keycloak through the company realm
 
 This needs a company-side OIDC client even though Harbor and the downstream
 Keycloak run locally. Local Keycloak admin access cannot change the callback
@@ -178,8 +257,8 @@ No company Harbor has been deployed yet. Before using the company issuer:
 
 The script serializes the extra object into Harbor's string-valued
 `oidc_extra_redirect_parms` field. It validates JSON and booleans before any
-update, escapes quoted names/secrets, and refuses the `lark` hint against the
-local test issuer. The default extra object is `{}`.
+update, escapes quoted names/secrets, and accepts an explicitly selected broker alias. The default extra object is
+`{}`; the named broker must exist in the selected realm.
 
 Use a fresh browser session to verify: Harbor button → Keycloak automatic
 redirect → Feishu → Keycloak broker callback → Harbor callback. An existing SSO
@@ -202,6 +281,7 @@ identity lifecycle; it does not by itself revoke existing Harbor sessions.
 ```bash
 python3 deploy/company-sso/test_setup_harbor_oidc.py
 python3 deploy/company-sso/test_setup_local_company_broker.py
+python3 deploy/company-sso/test_setup_local_feishu.py
 bash -n deploy/company-sso/setup-harbor-oidc.sh
 bash -n deploy/company-sso/connect-harbor-network.sh
 ```
@@ -218,6 +298,14 @@ go test ./pkg/oidc/ ./pkg/user/... ./controller/user/ ./core/controllers/ -count
 ```
 
 Verified on 2026-10-27:
+
+- Direct personal-organization Feishu authentication completed successfully in
+  the browser and returned to Harbor. The local Keycloak user has a `lark`
+  federated identity, and Harbor stored the corresponding user and display
+  name. The current username is the 35-character application-scoped Feishu
+  `open_id`; it is stable identity data, not a human-friendly account label.
+- The local setup regression suite passed all nine tests. No Feishu app
+  publishing or additional platform permissions were performed by the scripts.
 
 - The company public `account-console` authorization request with PKCE and
   `kc_idp_hint=lark` returned 303 to the Lark broker, then 303 to Feishu. No
@@ -236,14 +324,14 @@ Verified on 2026-10-27:
   `docker exec nginx nginx -s reload`.
 - **Issuer mismatch:** browser and core must reach the same issuer URL; rerun
   the network connection script for the local realm.
-- **Keycloak form instead of Feishu:** check that extra redirect parameters
-  contain `kc_idp_hint=lark`, that the company issuer is selected, and that the
-  broker alias and redirector are enabled. The local realm has no Lark broker.
+- **Keycloak form instead of Feishu:** check `kc_idp_hint=lark`, verify that
+  `setup-local-feishu.py` created the local broker, and use a fresh session.
+  The company issuer is only needed for the optional company integration.
 - **Cookie not found during scripted local login:** use a browser for the
   local HTTP realm's secure cookies; a raw cookie-jar script may reject them.
 - **Missing employee number:** verify the deployed custom core image, migration
   and IdP mapper, then sign in again.
 
-`docker compose down` in this directory removes the disposable Keycloak
-container. Harbor data is stored separately; do not remove it unless you intend
-to reset the development instance.
+`docker compose down` in this directory removes the Keycloak container but
+retains its data volume. Harbor data is stored separately. Do not remove either
+data set unless you intend to reset the development instance.

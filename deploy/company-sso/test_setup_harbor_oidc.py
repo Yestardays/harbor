@@ -60,9 +60,13 @@ class SetupOIDCTest(unittest.TestCase):
         self.assertEqual('Company "SSO"', self.requests[-1]["oidc_name"])
         self.assertNotIn(secret, result.stdout + result.stderr)
 
+    def test_local_feishu_hint_is_supported_after_broker_setup(self):
+        result = self.run_script(OIDC_EXTRA_REDIRECT_PARMS='{"kc_idp_hint":"lark"}')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({"kc_idp_hint": "lark"}, json.loads(self.requests[-1]["oidc_extra_redirect_parms"]))
+
     def test_invalid_settings_are_rejected_before_update(self):
         for settings in (
-            {"OIDC_EXTRA_REDIRECT_PARMS": '{"kc_idp_hint":"lark"}'},
             {"OIDC_EXTRA_REDIRECT_PARMS": "invalid-json"},
             {"OIDC_EXTRA_REDIRECT_PARMS": "[]"},
             {"OIDC_EXTRA_REDIRECT_PARMS": '{"kc_idp_hint":123}'},

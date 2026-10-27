@@ -23,7 +23,7 @@ OIDC_GROUPS_CLAIM="${OIDC_GROUPS_CLAIM:-groups}"
 OIDC_ADMIN_GROUP="${OIDC_ADMIN_GROUP:-harbor-admins}"
 OIDC_AUTO_ONBOARD="${OIDC_AUTO_ONBOARD:-true}"
 OIDC_LOGOUT="${OIDC_LOGOUT:-true}"
-# JSON object of string parameters. Set {"kc_idp_hint":"lark"} only for the company realm.
+# JSON object of string parameters. The selected IdP alias must exist in the configured realm.
 OIDC_EXTRA_REDIRECT_PARMS="${OIDC_EXTRA_REDIRECT_PARMS:-}"
 export OIDC_NAME OIDC_ENDPOINT OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_SCOPE
 export OIDC_USER_CLAIM OIDC_GROUPS_CLAIM OIDC_ADMIN_GROUP OIDC_AUTO_ONBOARD OIDC_LOGOUT
@@ -34,14 +34,11 @@ payload=$(python3 - <<'PYTHON'
 import json
 import os
 import sys
-from urllib.parse import urlparse
 
 try:
     extra = json.loads(os.environ["OIDC_EXTRA_REDIRECT_PARMS"] or "{}")
     if not isinstance(extra, dict) or any(not isinstance(v, str) for v in extra.values()):
         raise ValueError("OIDC_EXTRA_REDIRECT_PARMS must be a JSON object of strings")
-    if extra.get("kc_idp_hint") == "lark" and urlparse(os.environ["OIDC_ENDPOINT"]).hostname == "keycloak.localhost":
-        raise ValueError("The local test realm has no lark IdP; use the company issuer for this hint")
     payload = {"auth_mode": "oidc_auth", "oidc_verify_cert": True}
     for key in ("NAME", "ENDPOINT", "CLIENT_ID", "CLIENT_SECRET", "SCOPE", "USER_CLAIM", "GROUPS_CLAIM", "ADMIN_GROUP"):
         payload["oidc_" + key.lower()] = os.environ["OIDC_" + key]

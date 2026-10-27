@@ -15,7 +15,7 @@
 # Both sides then see exactly the same issuer, which go-oidc requires.
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.8.1
     container_name: harbor-sso-keycloak
     command:
       - start-dev
@@ -30,4 +30,9 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./realm-wxb.json:/opt/keycloak/data/import/realm-wxb.json:ro
+      - ${KEYCLOAK_REALM_IMPORT:-./realm-wxb.json}:/opt/keycloak/data/import/realm-wxb.json:ro
+      - keycloak-data:/opt/keycloak/data
+
+volumes:
+  keycloak-data:
+    name: harbor-sso-keycloak-data
