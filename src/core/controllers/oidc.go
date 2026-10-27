@@ -209,6 +209,7 @@ func (oc *OIDCController) Callback() {
 		return
 	}
 	oidc.InjectGroupsToUser(info, u)
+	backfillEmployeeNumber(ctx, u, info)
 	um, err := ctluser.Ctl.Get(ctx, u.UserID, &ctluser.Option{WithOIDCInfo: true})
 	if err != nil {
 		oc.SendError(err)
@@ -337,12 +338,17 @@ func userOnboard(ctx context.Context, oc *OIDCController, info *oidc.UserInfo, u
 		Token:  t,
 	}
 
+	realname := info.DisplayName()
+	if realname == "" {
+		realname = username
+	}
 	user := &models.User{
-		Username:     username,
-		Realname:     username,
-		Email:        info.Email,
-		OIDCUserMeta: &oidcUser,
-		Comment:      oidcUserComment,
+		Username:       username,
+		Realname:       realname,
+		Email:          info.Email,
+		EmployeeNumber: strings.TrimSpace(info.EmployeeNumber),
+		OIDCUserMeta:   &oidcUser,
+		Comment:        oidcUserComment,
 	}
 	oidc.InjectGroupsToUser(info, user)
 
@@ -354,6 +360,29 @@ func userOnboard(ctx context.Context, oc *OIDCController, info *oidc.UserInfo, u
 		return nil, false
 	}
 	return user, true
+}
+
+// backfillEmployeeNumber records the 工号 on an already onboarded user when it
+// is still empty. It is intentionally one-way: a value recorded earlier is
+// never overwritten, so a later login through a realm without the mapper (or
+// with a stale mapping) cannot erase it. Failures only warn — a missing 工号
+// must not block login.
+func backfillEmployeeNumber(ctx context.Context, u *models.User, info *oidc.UserInfo) {
+	if u == nil || info == nil {
+		return
+	}
+	employeeNumber := strings.TrimSpace(info.EmployeeNumber)
+	if employeeNumber == "" || u.EmployeeNumber != "" {
+		return
+	}
+	updated, err := ctluser.Ctl.BackfillEmployeeNumber(ctx, u.UserID, employeeNumber)
+	if err != nil {
+		log.Warningf("Failed to backfill employee number for user %s: %v", u.Username, err)
+		return
+	}
+	if updated {
+		u.EmployeeNumber = employeeNumber
+	}
 }
 
 // Onboard handles the request to onboard a user authenticated via OIDC provider

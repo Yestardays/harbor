@@ -1,0 +1,126 @@
+{
+  "realm": "wxb",
+  "displayName": "WXB company SSO (local Keycloak)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "clients": [
+    {
+      "clientId": "harbor",
+      "name": "Harbor",
+      "description": "Harbor registry, OIDC authorization-code flow",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "harbor-local-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/c/oidc/callback",
+        "http://127.0.0.1:8080/c/oidc/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:8080/*",
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "employee_number",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "employee_number",
+            "claim.name": "employee_number",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "harbor-admins",
+      "path": "/harbor-admins"
+    }
+  ],
+  "users": [
+    {
+      "username": "yanghaoxiang",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "杨皓翔",
+      "lastName": "yanghaoxiang",
+      "email": "yanghaoxiang@wangxiaobao.com",
+      "attributes": {
+        "employee_number": [
+          "WXB0001"
+        ]
+      },
+      "groups": [
+        "/harbor-admins"
+      ],
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Harbor12345",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "zhangsan",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "张三",
+      "lastName": "zhangsan",
+      "email": "zhangsan@wangxiaobao.com",
+      "attributes": {
+        "employee_number": [
+          "WXB0002"
+        ]
+      },
+      "groups": [],
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Harbor12345",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

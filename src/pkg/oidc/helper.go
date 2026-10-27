@@ -124,14 +124,27 @@ type Token struct {
 // UserInfo wraps the information that is extracted via token.  It will be transformed to data object that is persisted
 // in the DB
 type UserInfo struct {
-	Issuer              string   `json:"iss"`
-	Subject             string   `json:"sub"`
-	Username            string   `json:"name"`
+	Issuer   string `json:"iss"`
+	Subject  string `json:"sub"`
+	Username string `json:"name"`
+	// GivenName and FamilyName follow the OIDC standard claims. The company
+	// Keycloak realm maps the employee's display name (飞书 姓名) to
+	// given_name and the login account to family_name, so given_name is the
+	// only field holding a human-readable name for those users.
+	GivenName  string `json:"given_name"`
+	FamilyName string `json:"family_name"`
+	// EmployeeNumber is the company 工号, exposed by a Keycloak user-attribute
+	// protocol mapper. Empty when the IdP does not provide one.
+	EmployeeNumber      string   `json:"employee_number"`
 	Email               string   `json:"email"`
 	Groups              []string `json:"groups"`
 	AdminGroupMember    bool     `json:"admin_group_member"`
 	autoOnboardUsername string
 	hasGroupClaim       bool
+	// RawName is the raw `name` claim, kept when Username is replaced by the
+	// configured UserClaim so that DisplayName can still prefer it over the
+	// login account.
+	RawName string `json:"raw_name,omitempty"`
 }
 
 func getOauthConf(ctx context.Context) (*oauth2.Config, error) {
@@ -321,6 +334,13 @@ func mergeUserInfo(remote, local *UserInfo) *UserInfo {
 		Issuer:  local.Issuer,
 		// Used data from userinfo
 		Email: remote.Email,
+		// Employee attributes are not part of the legacy merge contract.
+		// Prefer the userinfo endpoint (the place protocol mappers write to),
+		// then fall back to the ID token in case only it carries them.
+		GivenName:      firstNonEmpty(remote.GivenName, local.GivenName),
+		FamilyName:     firstNonEmpty(remote.FamilyName, local.FamilyName),
+		EmployeeNumber: firstNonEmpty(remote.EmployeeNumber, local.EmployeeNumber),
+		RawName:        firstNonEmpty(remote.RawName, local.RawName),
 	}
 	// priority for username (high to low):
 	// 1. Username based on the auto onboard claim from ID token
@@ -345,6 +365,28 @@ func mergeUserInfo(remote, local *UserInfo) *UserInfo {
 		res.Groups = []string{}
 	}
 	return res
+}
+
+// DisplayName resolves the human-readable name shown in Harbor's user profile.
+// The company realm maps 姓名 to given_name and reuses family_name for the login
+// account, so given_name comes first; the remaining fields cover realms with a
+// different mapper layout. Returns "" when no claim carries a name.
+func (u *UserInfo) DisplayName() string {
+	for _, candidate := range []string{u.GivenName, u.RawName, u.FamilyName, u.Username} {
+		if name := strings.TrimSpace(candidate); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func userInfoFromRemote(ctx context.Context, token *Token, setting cfgModels.OIDCSetting) (*UserInfo, error) {
@@ -385,6 +427,10 @@ func userInfoFromClaims(c claimsProvider, setting cfgModels.OIDCSetting) (*UserI
 		}
 
 		if username, ok := allClaims[setting.UserClaim].(string); ok {
+			// Keep the raw `name` claim: Username is about to be replaced by
+			// the configured login claim, but the display name must not become
+			// the login account when the realm still supplies a real name.
+			res.RawName = res.Username
 			// res.Username and autoOnboardUsername both need to be set to create a fallback when mergeUserInfo has not been successfully called.
 			// This can for example occur when remote fails and only a local token is available for onboarding.
 			// Otherwise the onboard flow only has a fallback when "name" is set in the token, which is not always the case as a custom Username Claim could be configured.

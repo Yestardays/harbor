@@ -1,0 +1,33 @@
+# Local Keycloak for developing the company-SSO integration.
+#
+# The realm mirrors the company realm layout:
+#   - 姓名       -> given_name (Keycloak firstName)
+#   - 登录账号   -> family_name (Keycloak lastName)
+#   - 工号       -> employee_number user attribute, exposed by a protocol mapper
+#
+# KC_HOSTNAME is the issuer host. It must be identical for the browser and for
+# the Harbor core container, otherwise go-oidc rejects the discovery document
+# ("issuer did not match"). See README.md for the Docker network alias setup.
+# The issuer host is `keycloak.localhost`:
+#   - browsers resolve *.localhost to 127.0.0.1 with no /etc/hosts entry
+#   - the Harbor core container resolves it through the Docker alias added by
+#     connect-harbor-network.sh
+# Both sides then see exactly the same issuer, which go-oidc requires.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: harbor-sso-keycloak
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8081
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://keycloak.localhost:8081}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./realm-wxb.json:/opt/keycloak/data/import/realm-wxb.json:ro

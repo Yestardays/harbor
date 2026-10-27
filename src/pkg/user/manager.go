@@ -52,6 +52,8 @@ type Manager interface {
 	DeleteGDPR(ctx context.Context, id int) error
 	// SetSysAdminFlag sets the system admin flag of the user in local DB
 	SetSysAdminFlag(ctx context.Context, id int, admin bool) error
+	// BackfillEmployeeNumber fills an empty employee number atomically; returns whether it changed.
+	BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error)
 	// UpdateProfile updates the user's profile
 	UpdateProfile(ctx context.Context, user *commonmodels.User, col ...string) error
 	// UpdatePassword updates user's password
@@ -119,7 +121,8 @@ func (m *manager) DeleteGDPR(ctx context.Context, id int) error {
 	u.Email = fmt.Sprintf("%s#%d", m.GenerateCheckSum(u.Email), u.UserID)
 	u.Realname = fmt.Sprintf("%s#%d", m.GenerateCheckSum(u.Realname), u.UserID)
 	u.Deleted = true
-	return m.dao.Update(ctx, u, "username", "email", "realname", "deleted")
+	u.EmployeeNumber = ""
+	return m.dao.Update(ctx, u, "username", "email", "realname", "employee_number", "deleted")
 }
 
 func (m *manager) MatchLocalPassword(ctx context.Context, usernameOrEmail, password string) (*commonmodels.User, error) {
@@ -142,6 +145,10 @@ func (m *manager) Count(ctx context.Context, query *q.Query, options ...models.O
 		query = excludeDefaultAdmin(query)
 	}
 	return m.dao.Count(ctx, query)
+}
+
+func (m *manager) BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error) {
+	return m.dao.BackfillEmployeeNumber(ctx, id, employeeNumber)
 }
 
 func (m *manager) UpdateProfile(ctx context.Context, user *commonmodels.User, cols ...string) error {

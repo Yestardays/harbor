@@ -31,6 +31,8 @@ type DAO interface {
 	List(ctx context.Context, query *q.Query) ([]*commonmodels.User, error)
 	// Count counts the number of users
 	Count(ctx context.Context, query *q.Query) (int64, error)
+	// BackfillEmployeeNumber fills an empty employee number atomically; returns whether it changed.
+	BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error)
 	// Update updates the user record based on the model the parm props are the columns will be updated
 	Update(ctx context.Context, user *commonmodels.User, props ...string) error
 	// Delete delete user
@@ -84,6 +86,19 @@ func (d *dao) Create(ctx context.Context, user *commonmodels.User) (int, error) 
 		return 0, orm.WrapConflictError(err, "user %s or email %s already exists", user.Username, user.Email)
 	}
 	return int(id), nil
+}
+
+func (d *dao) BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error) {
+	o, err := orm.FromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	result, err := o.Raw("UPDATE harbor_user SET employee_number = ?, update_time = CURRENT_TIMESTAMP WHERE user_id = ? AND deleted = false AND (employee_number IS NULL OR employee_number = '')", employeeNumber, id).Exec()
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }
 
 func (d *dao) Update(ctx context.Context, user *commonmodels.User, props ...string) error {

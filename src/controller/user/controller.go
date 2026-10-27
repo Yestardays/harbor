@@ -61,6 +61,8 @@ type Controller interface {
 	GetBySubIss(ctx context.Context, sub, iss string) (*commonmodels.User, error)
 	// Delete ...
 	Delete(ctx context.Context, id int) error
+	// BackfillEmployeeNumber fills an empty employee number atomically; returns whether it changed.
+	BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error)
 	// UpdateProfile update the profile based on the ID and data in the model in parm, only a subset of attributes in the model
 	// will be update, see the implementation of manager.
 	UpdateProfile(ctx context.Context, u *commonmodels.User, cols ...string) error
@@ -147,6 +149,10 @@ func (c *controller) SetCliSecret(ctx context.Context, id int, secret string) er
 
 func (c *controller) Create(ctx context.Context, u *commonmodels.User) (int, error) {
 	return c.mgr.Create(ctx, u)
+}
+
+func (c *controller) BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error) {
+	return c.mgr.BackfillEmployeeNumber(ctx, id, employeeNumber)
 }
 
 func (c *controller) UpdateProfile(ctx context.Context, u *commonmodels.User, cols ...string) error {

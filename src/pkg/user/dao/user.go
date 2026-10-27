@@ -38,10 +38,13 @@ type User struct {
 	Comment         string         `orm:"column(comment)" json:"comment"`
 	Deleted         bool           `orm:"column(deleted)" json:"deleted"`
 	SysAdminFlag    bool           `orm:"column(sysadmin_flag)" json:"sysadmin_flag"`
-	ResetUUID       string         `orm:"column(reset_uuid)" json:"reset_uuid"`
-	Salt            string         `orm:"column(salt)" filter:"false" json:"-"`
-	CreationTime    time.Time      `orm:"column(creation_time);auto_now_add" json:"creation_time"`
-	UpdateTime      time.Time      `orm:"column(update_time);auto_now" json:"update_time"`
+	// EmployeeNumber is the company 工号 from the IdP. Nullable so users from
+	// other auth modes keep NULL instead of an empty string.
+	EmployeeNumber sql.NullString `orm:"column(employee_number)" json:"employee_number"`
+	ResetUUID      string         `orm:"column(reset_uuid)" json:"reset_uuid"`
+	Salt           string         `orm:"column(salt)" filter:"false" json:"-"`
+	CreationTime   time.Time      `orm:"column(creation_time);auto_now_add" json:"creation_time"`
+	UpdateTime     time.Time      `orm:"column(update_time);auto_now" json:"update_time"`
 }
 
 // TableName ...
@@ -65,6 +68,10 @@ func toDBUser(u *commonmodels.User) *User {
 	user.Comment = u.Comment
 	user.Deleted = u.Deleted
 	user.SysAdminFlag = u.SysAdminFlag
+	user.EmployeeNumber = sql.NullString{}
+	if u.EmployeeNumber != "" {
+		user.EmployeeNumber = sql.NullString{String: u.EmployeeNumber, Valid: true}
+	}
 	user.ResetUUID = u.ResetUUID
 	user.Salt = u.Salt
 	user.CreationTime = u.CreationTime
@@ -85,6 +92,7 @@ func toCommonUser(u *User) *commonmodels.User {
 	user.Comment = u.Comment
 	user.Deleted = u.Deleted
 	user.SysAdminFlag = u.SysAdminFlag
+	user.EmployeeNumber = u.EmployeeNumber.String
 	user.ResetUUID = u.ResetUUID
 	user.Salt = u.Salt
 	user.CreationTime = u.CreationTime

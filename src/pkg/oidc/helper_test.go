@@ -99,7 +99,7 @@ func TestAuthCodeURL(t *testing.T) {
 		common.OIDCCLientID:           "client",
 		common.OIDCClientSecret:       "secret",
 		common.ExtEndpoint:            "https://harbor.test",
-		common.OIDCExtraRedirectParms: `{"test_key":"test_value"}`,
+		common.OIDCExtraRedirectParms: `{"test_key":"test_value","kc_idp_hint":"lark"}`,
 	}
 	ctx := orm.Context()
 	config.GetCfgManager(ctx).UpdateConfig(ctx, conf)
@@ -110,6 +110,8 @@ func TestAuthCodeURL(t *testing.T) {
 	q, err := url.ParseQuery(u.RawQuery)
 	assert.Nil(t, err)
 	assert.Equal(t, "test_value", q.Get("test_key"))
+	assert.Equal(t, "lark", q.Get("kc_idp_hint"))
+	assert.Equal(t, "random", q.Get("state"))
 	assert.Equal(t, "offline", q.Get("access_type"))
 	assert.True(t, len(q.Get("code_challenge")) > 0)
 	assert.Equal(t, "S256", q.Get("code_challenge_method"))
@@ -298,10 +300,41 @@ func TestUserInfoFromClaims(t *testing.T) {
 				Subject:             "",
 				autoOnboardUsername: "airadier@gmail.com",
 				Username:            "airadier@gmail.com", // Set Username based on configured UserClaim
+				RawName:             "Alvaro",
 				Email:               "airadier@gmail.com",
 				Groups:              []string{},
 				hasGroupClaim:       false,
 				AdminGroupMember:    false,
+			},
+		},
+		{
+			// Company realm: 姓名 in given_name, login account in family_name,
+			// 工号 in employee_number. UserClaim=preferred_username resolves the
+			// login name without losing the display name.
+			input: map[string]any{
+				"sub":                "company-sub",
+				"iss":                "https://id.wangxiaobao.com/realms/wxb",
+				"name":               "杨皓翔 yanghaoxiang",
+				"given_name":         "杨皓翔",
+				"family_name":        "yanghaoxiang",
+				"preferred_username": "yanghaoxiang",
+				"email":              "yanghaoxiang@wangxiaobao.com",
+				"employee_number":    "WXB0001",
+			},
+			setting: cfgModels.OIDCSetting{
+				UserClaim: "preferred_username",
+			},
+			expect: &UserInfo{
+				Issuer:              "https://id.wangxiaobao.com/realms/wxb",
+				Subject:             "company-sub",
+				Username:            "yanghaoxiang",
+				autoOnboardUsername: "yanghaoxiang",
+				GivenName:           "杨皓翔",
+				FamilyName:          "yanghaoxiang",
+				EmployeeNumber:      "WXB0001",
+				RawName:             "杨皓翔 yanghaoxiang",
+				Email:               "yanghaoxiang@wangxiaobao.com",
+				Groups:              []string{},
 			},
 		},
 	}
@@ -310,6 +343,40 @@ func TestUserInfoFromClaims(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, *tc.expect, *out)
 	}
+}
+
+// TestUserInfoFromCompanyRealmPayload pins the contract against a real userinfo
+// response produced by deploy/company-sso/realm-wxb.json. Harbor receives this
+// payload after the authorization-code exchange, so a drift in the Keycloak
+// mappers or in the claim names fails here first.
+func TestUserInfoFromCompanyRealmPayload(t *testing.T) {
+	const payload = `{
+		"sub": "6212d810-86cb-4986-b063-cd5759a872fb",
+		"email_verified": true,
+		"name": "杨皓翔 yanghaoxiang",
+		"employee_number": "WXB0001",
+		"groups": ["harbor-admins"],
+		"preferred_username": "yanghaoxiang",
+		"given_name": "杨皓翔",
+		"family_name": "yanghaoxiang",
+		"email": "yanghaoxiang@wangxiaobao.com"
+	}`
+	claims := map[string]any{}
+	assert.NoError(t, json.Unmarshal([]byte(payload), &claims))
+	setting := cfgModels.OIDCSetting{
+		UserClaim:   "preferred_username",
+		GroupsClaim: "groups",
+		AdminGroup:  "harbor-admins",
+	}
+	info, err := userInfoFromClaims(&fakeClaims{claims}, setting)
+	assert.NoError(t, err)
+	assert.Equal(t, "yanghaoxiang", info.Username)
+	assert.Equal(t, "杨皓翔", info.GivenName)
+	assert.Equal(t, "yanghaoxiang", info.FamilyName)
+	assert.Equal(t, "WXB0001", info.EmployeeNumber)
+	assert.Equal(t, "yanghaoxiang@wangxiaobao.com", info.Email)
+	assert.Equal(t, "杨皓翔", info.DisplayName())
+	assert.True(t, info.AdminGroupMember)
 }
 
 func TestMergeUserInfo(t *testing.T) {
@@ -459,11 +526,68 @@ func TestMergeUserInfo(t *testing.T) {
 				hasGroupClaim: true,
 			},
 		},
+		{
+			// Employee attributes come from userinfo when present, then fall back
+			// to the ID token. A missing remote value must still surface the
+			// locally claimed one instead of dropping it.
+			fromInfo: &UserInfo{
+				EmployeeNumber: "WXB0001",
+				GivenName:      "杨皓翔",
+			},
+			fromIDToken: &UserInfo{
+				Issuer:         "issuer-wxb",
+				Subject:        "subject-wxb",
+				Username:       "yanghaoxiang",
+				GivenName:      "local-name",
+				EmployeeNumber: "WXB9999",
+			},
+			expected: &UserInfo{
+				Issuer:         "issuer-wxb",
+				Subject:        "subject-wxb",
+				Username:       "yanghaoxiang",
+				GivenName:      "杨皓翔",
+				EmployeeNumber: "WXB0001",
+				Groups:         []string{},
+			},
+		},
 	}
 
 	for _, tc := range s {
 		m := mergeUserInfo(tc.fromInfo, tc.fromIDToken)
 		assert.Equal(t, *tc.expected, *m)
+	}
+}
+
+func TestDisplayNameSurvivesOnboardSession(t *testing.T) {
+	info, err := userInfoFromClaims(&fakeClaims{map[string]any{
+		"sub": "employee-subject", "name": "Example Employee", "login": "employee.login",
+	}}, cfgModels.OIDCSetting{UserClaim: "login"})
+	assert.NoError(t, err)
+	data, err := json.Marshal(info)
+	assert.NoError(t, err)
+	var restored UserInfo
+	assert.NoError(t, json.Unmarshal(data, &restored))
+	assert.Equal(t, "Example Employee", restored.DisplayName())
+	assert.Equal(t, "employee.login", restored.Username)
+}
+
+func TestDisplayName(t *testing.T) {
+	tests := []struct {
+		name string
+		info UserInfo
+		want string
+	}{
+		{name: "company realm prefers given_name", info: UserInfo{GivenName: "杨皓翔", FamilyName: "yanghaoxiang", Username: "yanghaoxiang", RawName: "杨皓翔 yanghaoxiang"}, want: "杨皓翔"},
+		{name: "raw name after username was overridden", info: UserInfo{Username: "yanghaoxiang", RawName: "Haoxiang Yang"}, want: "Haoxiang Yang"},
+		{name: "falls back to family_name", info: UserInfo{FamilyName: "yanghaoxiang", Username: "yanghaoxiang"}, want: "yanghaoxiang"},
+		{name: "falls back to username", info: UserInfo{Username: "yanghaoxiang"}, want: "yanghaoxiang"},
+		{name: "trims whitespace", info: UserInfo{GivenName: "  杨皓翔  "}, want: "杨皓翔"},
+		{name: "no name claims", info: UserInfo{}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.info.DisplayName())
+		})
 	}
 }
 

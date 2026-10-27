@@ -187,6 +187,80 @@ func (suite *DaoTestSuite) TestCreate() {
 	}
 }
 
+// TestEmployeeNumber covers the company-SSO column end to end: persisted on
+// create, readable, updated by the partial "EmployeeNumber" backfill, and empty
+// for users created by other auth modes.
+func (suite *DaoTestSuite) TestEmployeeNumber() {
+	ctx := orm.Context()
+	id, err := suite.dao.Create(ctx, &commonmodels.User{
+		Username:       "oidc-employee",
+		Realname:       "杨皓翔",
+		Email:          "oidc-employee@test.com",
+		EmployeeNumber: "WXB0001",
+	})
+	suite.Require().Nil(err)
+	defer suite.appendClearSQL(id)
+
+	users, err := suite.dao.List(ctx, q.New(q.KeyWords{"user_id": id}))
+	suite.Require().Nil(err)
+	suite.Require().Len(users, 1)
+	suite.Equal("WXB0001", users[0].EmployeeNumber)
+
+	err = suite.dao.Update(ctx, &commonmodels.User{UserID: id, EmployeeNumber: "WXB0002"}, "EmployeeNumber")
+	suite.Require().Nil(err)
+
+	users, err = suite.dao.List(ctx, q.New(q.KeyWords{"user_id": id}))
+	suite.Require().Nil(err)
+	suite.Require().Len(users, 1)
+	suite.Equal("WXB0002", users[0].EmployeeNumber)
+	suite.Equal("oidc-employee", users[0].Username)
+	suite.Equal("杨皓翔", users[0].Realname)
+
+	otherID, err := suite.dao.Create(ctx, &commonmodels.User{Username: "db-auth-user", Email: "db-auth-user@test.com"})
+	suite.Require().Nil(err)
+	defer suite.appendClearSQL(otherID)
+	other, err := suite.dao.List(ctx, q.New(q.KeyWords{"user_id": otherID}))
+	suite.Require().Nil(err)
+	suite.Require().Len(other, 1)
+	suite.Empty(other[0].EmployeeNumber)
+}
+
+func (suite *DaoTestSuite) TestBackfillEmployeeNumber() {
+	ctx := orm.Context()
+	for _, initial := range []string{"", "existing-number"} {
+		id, err := suite.dao.Create(ctx, &commonmodels.User{Username: "backfill-" + initial, EmployeeNumber: initial})
+		suite.Require().NoError(err)
+		defer suite.appendClearSQL(id)
+		changed, err := suite.dao.BackfillEmployeeNumber(ctx, id, "first-number")
+		suite.Require().NoError(err)
+		suite.Equal(initial == "", changed)
+		// A second callback using a stale empty snapshot must not replace the first value.
+		changed, err = suite.dao.BackfillEmployeeNumber(ctx, id, "stale-number")
+		suite.Require().NoError(err)
+		suite.False(changed)
+		users, err := suite.dao.List(ctx, q.New(q.KeyWords{"user_id": id}))
+		suite.Require().NoError(err)
+		suite.Require().Len(users, 1)
+		want := initial
+		if want == "" {
+			want = "first-number"
+		}
+		suite.Equal(want, users[0].EmployeeNumber)
+	}
+	// Legacy empty strings and NULL both mean the value has not been backfilled.
+	id, err := suite.dao.Create(ctx, &commonmodels.User{Username: "backfill-empty-string"})
+	suite.Require().NoError(err)
+	defer suite.appendClearSQL(id)
+	suite.Require().NoError(suite.dao.Update(ctx, &commonmodels.User{UserID: id}, "EmployeeNumber"))
+	o, err := orm.FromContext(ctx)
+	suite.Require().NoError(err)
+	_, err = o.Raw("UPDATE harbor_user SET employee_number = '' WHERE user_id = ?", id).Exec()
+	suite.Require().NoError(err)
+	changed, err := suite.dao.BackfillEmployeeNumber(ctx, id, "legacy-number")
+	suite.Require().NoError(err)
+	suite.True(changed)
+}
+
 func (suite *DaoTestSuite) appendClearSQL(uid int) {
 	suite.ClearSQLs = append(suite.ClearSQLs, fmt.Sprintf("DELETE FROM harbor_user WHERE user_id = %d", uid))
 }

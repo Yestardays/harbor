@@ -32,13 +32,16 @@ type User struct {
 	Role            int    `json:"role_id"`
 	SysAdminFlag    bool   `json:"sysadmin_flag"`
 	// AdminRoleInAuth to store the admin privilege granted by external authentication provider
-	AdminRoleInAuth bool      `json:"admin_role_in_auth"`
-	ResetUUID       string    `json:"reset_uuid"`
-	Salt            string    `json:"-"`
-	CreationTime    time.Time `json:"creation_time"`
-	UpdateTime      time.Time `json:"update_time"`
-	GroupIDs        []int     `json:"-"`
-	OIDCUserMeta    *OIDCUser `json:"oidc_user_meta,omitempty"`
+	AdminRoleInAuth bool `json:"admin_role_in_auth"`
+	// EmployeeNumber is the 工号 supplied by the company IdP (Keycloak claim
+	// `employee_number`). Empty for users created by other auth modes.
+	EmployeeNumber string    `json:"employee_number,omitempty"`
+	ResetUUID      string    `json:"reset_uuid"`
+	Salt           string    `json:"-"`
+	CreationTime   time.Time `json:"creation_time"`
+	UpdateTime     time.Time `json:"update_time"`
+	GroupIDs       []int     `json:"-"`
+	OIDCUserMeta   *OIDCUser `json:"oidc_user_meta,omitempty"`
 }
 
 type Users []*User

@@ -51,10 +51,11 @@ func (m *mgrTestSuite) TestSetAdminFlag() {
 
 func (m *mgrTestSuite) TestUserDeleteGDPR() {
 	existingUser := &models.User{
-		UserID:   123,
-		Username: "existing",
-		Email:    "existing@mytest.com",
-		Realname: "RealName",
+		UserID:         123,
+		Username:       "existing",
+		Email:          "existing@mytest.com",
+		Realname:       "RealName",
+		EmployeeNumber: "employee-test-number",
 	}
 	m.dao.On("List", mock.Anything, testifymock.MatchedBy(
 		func(query *q.Query) bool {
@@ -68,11 +69,12 @@ func (m *mgrTestSuite) TestUserDeleteGDPR() {
 				u.Email == fmt.Sprintf("%s#%d", m.mgr.GenerateCheckSum("existing@mytest.com"), existingUser.UserID) &&
 				u.Username == fmt.Sprintf("%s#%d", m.mgr.GenerateCheckSum("existing"), existingUser.UserID) &&
 				u.Realname == fmt.Sprintf("%s#%d", m.mgr.GenerateCheckSum("RealName"), existingUser.UserID) &&
-				u.Deleted == true
+				u.EmployeeNumber == "" && u.Deleted == true
 		}),
 		"username",
 		"email",
 		"realname",
+		"employee_number",
 		"deleted",
 	).Return(nil)
 

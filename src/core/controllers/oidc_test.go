@@ -1,9 +1,51 @@
 package controllers
 
 import (
-	"github.com/stretchr/testify/assert"
+	"context"
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/goharbor/harbor/src/common/models"
+	ctluser "github.com/goharbor/harbor/src/controller/user"
+	"github.com/goharbor/harbor/src/pkg/oidc"
+	mockuser "github.com/goharbor/harbor/src/testing/controller/user"
 )
+
+func TestBackfillEmployeeNumber(t *testing.T) {
+	original := ctluser.Ctl
+	t.Cleanup(func() { ctluser.Ctl = original })
+	for _, tc := range []struct {
+		name     string
+		existing string
+		claim    string
+		write    bool
+		err      error
+		want     string
+	}{
+		{name: "backfill empty", claim: " WXB0001 ", write: true, want: "WXB0001"},
+		{name: "preserve existing", existing: "WXB0001", claim: "WXB9999", want: "WXB0001"},
+		{name: "ignore blank", claim: "  "},
+		{name: "leave empty on failure", claim: "WXB0001", write: true, err: errors.New("database unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			controller := &mockuser.Controller{}
+			ctluser.Ctl = controller
+			ctx := context.Background()
+			if tc.write {
+				controller.On("BackfillEmployeeNumber", ctx, 42, "WXB0001").Return(tc.err == nil, tc.err).Once()
+			}
+			u := &models.User{UserID: 42, EmployeeNumber: tc.existing}
+			backfillEmployeeNumber(ctx, u, &oidc.UserInfo{EmployeeNumber: tc.claim})
+			assert.Equal(t, tc.want, u.EmployeeNumber)
+			controller.AssertExpectations(t)
+			if !tc.write {
+				controller.AssertNotCalled(t, "BackfillEmployeeNumber")
+			}
+		})
+	}
+}
 
 func TestGetSessionType(t *testing.T) {
 	tests := []struct {

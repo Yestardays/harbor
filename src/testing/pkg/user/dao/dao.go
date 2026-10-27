@@ -17,6 +17,34 @@ type DAO struct {
 	mock.Mock
 }
 
+// BackfillEmployeeNumber provides a mock function with given fields: ctx, id, employeeNumber
+func (_m *DAO) BackfillEmployeeNumber(ctx context.Context, id int, employeeNumber string) (bool, error) {
+	ret := _m.Called(ctx, id, employeeNumber)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillEmployeeNumber")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int, string) (bool, error)); ok {
+		return rf(ctx, id, employeeNumber)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int, string) bool); ok {
+		r0 = rf(ctx, id, employeeNumber)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int, string) error); ok {
+		r1 = rf(ctx, id, employeeNumber)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Count provides a mock function with given fields: ctx, query
 func (_m *DAO) Count(ctx context.Context, query *q.Query) (int64, error) {
 	ret := _m.Called(ctx, query)
